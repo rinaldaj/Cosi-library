@@ -7,6 +7,8 @@ import(
 	"crypto/rand"
 	"golang.org/x/crypto/scrypt"
 	"io"
+	"regexp"
+	"encoding/hex"
 )
 
 
@@ -23,8 +25,8 @@ type Person struct {
 	StudentId	string
 	Email	string
 	Username	string
-	Passhash	string
-	Salt	string
+	Passhash	[]byte
+	Salt	[]byte
 }
 
 func getBooks(db *sql.DB) []Book{
@@ -73,23 +75,53 @@ func saveBook(b Book,db *sql.DB){
 
 }
 
-func addUser(db *sql.DB,user Person) Person{
+func bytesToDB(by []byte) string{
+	//Combines all of the bytes in a str
+	ret := fmt.Sprintf("%x",by)
+	process := regexp.MustCompile("\\s|\\[|\\]")
+	return process.ReplaceAllString(ret,"")
+}
+
+func dbToBytes(str string) []byte{
+	ret := make([]byte, 64)
+	box,_ := hex.Decode(ret,[]byte(str))
+	return ret[:box]
+}
+
+func addUser(db *sql.DB,user Person) (Person,error){
 	//REQUIRE: person have non-null fields except for dbid and salt. Also pashash should be set to their password.
 	//ensures: database has the new user and a updated person is returned
 	salt := make([]byte,32)
 	 io.ReadFull(rand.Reader,salt)
-	hash, _ := scrypt.Key([]byte(user.Passhash),salt,1<<14,8,1,64)
-	query := fmt.Sprintf("INSERT INTO people(name,studentId,email,username,passhash,salt) VALUES(%q,%q,%q,%q,%q,%q);",user.Name,user.StudentId,user.Email,user.Username,string(hash),string(salt))
-	db.Query(query)
-
-	ret := Person{user.Name,user.StudentId,user.Email,user.Username,string(hash),string(salt)}
-	return ret;
+	hash, _ := scrypt.Key(user.Passhash,salt,1<<14,8,1,64)
+	fmt.Printf("gen %x\n",(hash))
+	query := fmt.Sprintf("INSERT INTO people(name,studentId,email,username,passhash,salt) VALUES(%q,%q,%q,%q,%q,%q);",user.Name,user.StudentId,user.Email,user.Username,bytesToDB(hash),bytesToDB(salt))
+	_,err := db.Query(query)
+	fmt.Println(err)
+	ret := Person{user.Name,user.StudentId,user.Email,user.Username,hash,salt}
+	return ret,err;
 }
 
-func login(db *sql.DB,user Person) Person{
-	res,_ := db.Query(fmt.Sprintf("SELECT passhash from people where username=%q;",user.Username))
+func login(db *sql.DB,user Person) (Person,bool){
+	query := fmt.Sprintf("SELECT passhash,salt from people where username=%q;",user.Username)
+	res,_ := db.Query(query)
 	var salt string;
- }
+	var pHash string;
+	if res.Next(){
+		res.Scan(&pHash,&salt)
+	} else {
+		return user,false
+	}
+	unsalt := dbToBytes(salt)
+	unhash := dbToBytes(pHash)
+	hash, _ := scrypt.Key(user.Passhash,unsalt,1<<14,8,1,64)
+	//fmt.Printf("given: %v\ngenerated: %v\n",hash,[]byte(pHash))
+	fmt.Printf("hash %x\n", unhash)
+	if (string(hash)==string( unhash)) {
+		return Person{user.Name,user.StudentId,user.Email,user.Username,unhash,unsalt},true
+	}
+	return user,false
+}
 
 
 func main(){
@@ -98,5 +130,9 @@ func main(){
 		return
 	}
 	defer db.Close()
-	fmt.Println(getBooks(db))
+	myUsr := Person{"Anthony Rinaldo","0524789","rinaldaj@clarkson.edu","rinaldaj",[]byte("password"),[]byte("")}
+	addUser(db,myUsr)
+	me,logged := login(db,myUsr)
+	fmt.Printf("Name: %q, logged in %t\n",me.Username,logged)
 }
+
