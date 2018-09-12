@@ -12,6 +12,8 @@ import(
 	"os"
 	"golang.org/x/crypto/ssh/terminal"
 	"bufio"
+	"net/http"
+	//"html/template"
 )
 
 
@@ -164,6 +166,8 @@ func main(){
 		return
 	}
 	defer db.Close()
-	fmt.Println(err)
+	fmt.Println("Listening on Port 8080")
+	http.Handle("/",http.FileServer(http.Dir("./html")))
+	http.ListenAndServe(":8080",nil)
 }
 
