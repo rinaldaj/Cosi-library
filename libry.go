@@ -9,6 +9,9 @@ import(
 	"io"
 	"regexp"
 	"encoding/hex"
+	"os"
+	"golang.org/x/crypto/ssh/terminal"
+	"bufio"
 )
 
 
@@ -125,14 +128,42 @@ func login(db *sql.DB,user Person) (Person,bool){
 
 
 func main(){
-	db,err := sql.Open("mysql","librarian:password@/bookshelf")
+	conf,err := os.Open("/etc/librarian.conf")
+	librarian := ""
+	libpasswd := ""
+	basename := ""
+	if err != nil {
+		fmt.Println("Attempting first time set up")
+		conf,err = os.Create("/etc/librarian.conf")
+		if err != nil {
+			fmt.Printf("FAILED TO CREATE CONFIGURATION FILE\n%s",err)
+			return
+		}
+		fmt.Println("Enter Database name")
+		fmt.Scanln(&basename)
+		fmt.Println("Enter database username")
+		fmt.Scanln(&librarian)
+		fmt.Printf("Password: ")
+		passwd,err := terminal.ReadPassword(0)
+		if err != nil {
+			fmt.Println("Something Went wrong")
+			return
+		}
+		libpasswd = string(passwd)
+		fmt.Fprintf(conf,"%s\n%s\n%s\n",librarian,libpasswd,basename)
+	} else {
+		configReader := bufio.NewReader(conf)
+		librarian,_ = configReader.ReadString('\n')
+		libpasswd,_ = configReader.ReadString('\n')
+		basename,_ = configReader.ReadString('\n')
+	}
+	conf.Close()
+
+	db,err := sql.Open("mysql",librarian + ":"+ libpasswd +"@/"+ basename)
 	if err != nil {
 		return
 	}
 	defer db.Close()
-	myUsr := Person{"Anthony Rinaldo","0524789","rinaldaj@clarkson.edu","rinaldaj",[]byte("password"),[]byte("")}
-	addUser(db,myUsr)
-	me,logged := login(db,myUsr)
-	fmt.Printf("Name: %q, logged in %t\n",me.Username,logged)
+	fmt.Println(err)
 }
 
