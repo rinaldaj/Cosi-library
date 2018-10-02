@@ -15,10 +15,12 @@ import(
 	"net/http"
 	//"html/template"
 	"encoding/json"
+	"github.com/msteinert/pam"
 )
 
 
 type Book struct {
+	//represents a book
 	Title string
 	Author string
 	Isbn	string
@@ -27,15 +29,17 @@ type Book struct {
 }
 
 type Person struct {
+	//Represents a Person
 	Name	string
 	StudentId	string
 	Email	string
 	Username	string
-	Passhash	[]byte
+	Password	[]byte
 	Salt	[]byte
+	Session	[]byte
 }
 
-var DB *sql.DB
+var DB *sql.DB// This is used for the web app to connect to the Database because they need a very specific function handler
 
 func getBooks(db *sql.DB) []Book{
 	//REQUIRES: db be a working connection to a mysql database with table books and fields title, author,isbn, and borrower where title and author are not null
@@ -101,7 +105,7 @@ func addUser(db *sql.DB,user Person) (Person,error){
 	//ensures: database has the new user and a updated person is returned
 	salt := make([]byte,32)
 	 io.ReadFull(rand.Reader,salt)
-	hash, _ := scrypt.Key(user.Passhash,salt,1<<14,8,1,64)
+	hash, _ := scrypt.Key(user.Password,salt,1<<14,8,1,64)
 	query := fmt.Sprintf("INSERT INTO people(name,studentId,email,username,passhash,salt) VALUES(%q,%q,%q,%q,%q,%q);",user.Name,user.StudentId,user.Email,user.Username,bytesToDB(hash),bytesToDB(salt))
 	_,err := db.Query(query)
 	fmt.Println(err)
@@ -121,13 +125,33 @@ func login(db *sql.DB,user Person) (Person,bool){
 	}
 	unsalt := dbToBytes(salt)
 	unhash := dbToBytes(pHash)
-	hash, _ := scrypt.Key(user.Passhash,unsalt,1<<14,8,1,64)
+	hash, _ := scrypt.Key(user.Password,unsalt,1<<14,8,1,64)
 	//fmt.Printf("given: %v\ngenerated: %v\n",hash,[]byte(pHash))
 	fmt.Printf("hash %x\n", unhash)
 	if (string(hash)==string( unhash)) {
 		return Person{user.Name,user.StudentId,user.Email,user.Username,unhash,unsalt},true
 	}
 	return user,false
+}
+
+func pamAuth(user Person) (Person,bool){
+	//This funtion takes a Person and returns that person with their session modified to contain their session if they logged in. Also returns a boolean to indicate if they were logged in
+	cred := pam.Credentials{ User: user.Username, Password: user.Password}
+	tx,err := pam.Start("","",cred)
+	if err != nil {
+		fmt.Printf("Error at line 142 %q",err)
+		return (user,false)
+	}
+	err = tx.Authenticate(0)
+	if err != nil {
+		return (user,false)
+	}
+	session := make([]byte,32) //yes we are going to have a 32 byte session
+	 io.ReadFull(rand.Reader,session)
+	var conv string
+	fmt.Sprintf(conv,"%x",session)
+	user.Session = conv
+	
 }
 
 func mkaccHandler(w http.ResponseWriter, r *http.Request){
